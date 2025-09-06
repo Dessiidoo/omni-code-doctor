@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { Copy, Download, Play, Zap, CheckCircle, XCircle } from 'lucide-react';
+import { Copy, Download, Play, Zap, CheckCircle, XCircle, Github } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface CodeEditorProps {
@@ -17,6 +18,8 @@ interface CodeEditorProps {
 export function CodeEditor({ onAnalyze, isAnalyzing = false, fixedCode, issues = [] }: CodeEditorProps) {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState('javascript');
+  const [githubUrl, setGithubUrl] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
 
   const handleAnalyze = () => {
     if (!code.trim()) {
@@ -42,6 +45,73 @@ export function CodeEditor({ onAnalyze, isAnalyzing = false, fixedCode, issues =
     toast.success('Code downloaded');
   };
 
+  const fetchFromGithub = async () => {
+    if (!githubUrl.trim()) {
+      toast.error('Please enter a GitHub URL');
+      return;
+    }
+
+    setIsFetching(true);
+    try {
+      // Parse GitHub URL
+      const urlMatch = githubUrl.match(/github\.com\/([^\/]+)\/([^\/]+)(?:\/blob\/[^\/]+)?(?:\/(.+))?/);
+      if (!urlMatch) {
+        throw new Error('Invalid GitHub URL format');
+      }
+
+      const [, owner, repo, filePath] = urlMatch;
+      
+      if (filePath) {
+        // Fetch specific file
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+        const response = await fetch(apiUrl);
+        
+        if (!response.ok) throw new Error('Failed to fetch file');
+        
+        const data = await response.json();
+        const content = atob(data.content);
+        setCode(content);
+        
+        // Auto-detect language from file extension
+        const ext = filePath.split('.').pop()?.toLowerCase();
+        const langMap: Record<string, string> = {
+          'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+          'java': 'java', 'cpp': 'cpp', 'c': 'cpp', 'go': 'go', 'rs': 'rust'
+        };
+        if (ext && langMap[ext]) setLanguage(langMap[ext]);
+        
+        toast.success('Code fetched from GitHub');
+      } else {
+        // Fetch repository file list
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents`;
+        const response = await fetch(apiUrl);
+        
+        if (!response.ok) throw new Error('Failed to fetch repository');
+        
+        const files = await response.json();
+        const codeFiles = files.filter((f: any) => 
+          f.type === 'file' && /\.(js|ts|py|java|cpp|c|go|rs)$/i.test(f.name)
+        );
+        
+        if (codeFiles.length === 0) {
+          throw new Error('No code files found in repository');
+        }
+        
+        // Fetch first code file
+        const firstFile = codeFiles[0];
+        const fileResponse = await fetch(firstFile.download_url);
+        const content = await fileResponse.text();
+        setCode(content);
+        
+        toast.success(`Fetched ${firstFile.name} from repository`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to fetch from GitHub');
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
       {/* Input Section */}
@@ -63,6 +133,33 @@ export function CodeEditor({ onAnalyze, isAnalyzing = false, fixedCode, issues =
               <option value="rust">Rust</option>
             </select>
           </div>
+        </div>
+
+        {/* GitHub URL Input */}
+        <div className="mb-4 space-y-2">
+          <div className="flex gap-2">
+            <Input
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              placeholder="https://github.com/user/repo or https://github.com/user/repo/blob/main/file.js"
+              className="flex-1"
+            />
+            <Button
+              onClick={fetchFromGithub}
+              disabled={isFetching || !githubUrl.trim()}
+              variant="outline"
+              size="sm"
+            >
+              {isFetching ? (
+                <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+              ) : (
+                <Github className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Paste GitHub repo URL or direct file link to fetch code automatically
+          </p>
         </div>
         
         <Textarea
